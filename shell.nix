@@ -4,6 +4,7 @@ mkShell {
         rustc
         rustfmt
         shellcheck
+        valgrind
     ];
     shellHook = ''
         . .shellhook
