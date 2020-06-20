@@ -1,0 +1,8 @@
+*
+!.gitignore
+!*.nix
+!.shellhook
+!*.toml
+!src/
+!*.rs
+!main
