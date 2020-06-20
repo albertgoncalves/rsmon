@@ -1,8 +1,6 @@
 use std::iter::Peekable;
 use std::str::CharIndices;
 
-const RADIX: u32 = 10;
-
 #[derive(Debug, PartialEq)]
 enum Token<'a> {
     EOF,
@@ -28,75 +26,77 @@ enum Token<'a> {
     Illegal(&'a str),
 }
 
-macro_rules! get_substring {
-    ($fn:expr, $string:expr, $chars:expr, $i:expr $(,)?) => {{
-        let mut substring: &str = &$string[$i..$i];
-        while let Some((j, c)) = $chars.peek() {
-            substring = &$string[$i..*j];
-            if $fn(c) {
-                let _: Option<(usize, char)> = $chars.next();
-            } else {
-                break;
-            }
-        }
-        substring
-    }};
-}
-
-fn get_keyword_or_ident<'a>(
-    string: &'a str,
-    chars: &mut Peekable<CharIndices<'a>>,
-    i: usize,
-) -> Token<'a> {
-    let substring: &str = get_substring!(
-        |c: &char| c.is_alphabetic() || (*c == '_'),
-        string,
-        chars,
-        i,
-    );
-    match substring {
-        "let" => Token::Let,
-        "fn" => Token::Func,
-        "return" => Token::Return,
-        "if" => Token::If,
-        "else" => Token::Else,
-        "true" => Token::True,
-        "false" => Token::False,
-        _ => Token::Ident(substring),
-    }
-}
-
-fn get_num<'a>(
-    string: &'a str,
-    chars: &mut Peekable<CharIndices<'a>>,
-    i: usize,
-) -> Token<'a> {
-    let substring: &str =
-        get_substring!(|c: &char| c.is_digit(RADIX), string, chars, i,);
-    if let Ok(n) = substring.parse() {
-        Token::Num(n)
-    } else {
-        Token::Illegal(substring)
-    }
-}
-
-macro_rules! set_equality_op {
-    ($chars:expr, $tokens:expr, $token:expr, $string:expr $(,)?) => {{
-        if let Some((_, c)) = $chars.peek() {
-            if *c == '=' {
-                $tokens.push(Token::BinOp($string));
-                let _: Option<(usize, char)> = $chars.next();
-                continue;
-            }
-        }
-        $tokens.push($token)
-    }};
-}
+const RADIX: u32 = 10;
 
 fn get_tokens(string: &str) -> Vec<Token<'_>> {
     let mut tokens: Vec<Token<'_>> = Vec::with_capacity(string.len());
     let mut chars: Peekable<CharIndices<'_>> =
         string.char_indices().peekable();
+    macro_rules! get_substring {
+        ($fn:expr, $i:expr $(,)?) => {{
+            let mut substring: &str = &string[$i..$i];
+            while let Some((j, c)) = chars.peek() {
+                substring = &string[$i..*j];
+                if $fn(c) {
+                    let _: Option<(usize, char)> = chars.next();
+                } else {
+                    break;
+                }
+            }
+            substring
+        }};
+    }
+    macro_rules! push_equality_or {
+        ($bin_op:expr, $fallback:expr $(,)?) => {{
+            if let Some((_, c)) = chars.peek() {
+                if *c == '=' {
+                    tokens.push(Token::BinOp($bin_op));
+                    let _: Option<(usize, char)> = chars.next();
+                    continue;
+                }
+            }
+            tokens.push($fallback)
+        }};
+    }
+    macro_rules! return_illegal {
+        ($string:expr $(,)?) => {
+            tokens.push(Token::Illegal($string));
+            return tokens;
+        };
+    }
+    macro_rules! do_other_char {
+        ($i:expr, $c:expr $(,)?) => {{
+            if $c.is_whitespace() {
+                continue;
+            } else if $c.is_alphabetic() {
+                let substring: &str = get_substring!(
+                    |c: &char| c.is_alphabetic() || (*c == '_'),
+                    $i,
+                );
+                let token: Token<'_> = match substring {
+                    "let" => Token::Let,
+                    "fn" => Token::Func,
+                    "return" => Token::Return,
+                    "if" => Token::If,
+                    "else" => Token::Else,
+                    "true" => Token::True,
+                    "false" => Token::False,
+                    _ => Token::Ident(substring),
+                };
+                tokens.push(token);
+            } else if $c.is_digit(RADIX) {
+                let substring: &str =
+                    get_substring!(|c: &char| c.is_digit(RADIX), $i);
+                if let Ok(n) = substring.parse() {
+                    tokens.push(Token::Num(n))
+                } else {
+                    return_illegal!(substring);
+                }
+            } else {
+                return_illegal!(&string[$i..$i + 1]);
+            }
+        }};
+    }
     loop {
         if let Some((i, c)) = chars.next() {
             match c {
@@ -107,26 +107,14 @@ fn get_tokens(string: &str) -> Vec<Token<'_>> {
                 ';' => tokens.push(Token::Semicolon),
                 ',' => tokens.push(Token::Comma),
                 '-' => tokens.push(Token::Minus),
-                '=' => set_equality_op!(chars, tokens, Token::Assign, "=="),
-                '!' => set_equality_op!(chars, tokens, Token::UnOp('!'), "!="),
+                '=' => push_equality_or!("==", Token::Assign),
+                '!' => push_equality_or!("!=", Token::UnOp('!')),
                 '+' => tokens.push(Token::BinOp("+")),
                 '*' => tokens.push(Token::BinOp("*")),
                 '/' => tokens.push(Token::BinOp("/")),
                 '<' => tokens.push(Token::BinOp("<")),
                 '>' => tokens.push(Token::BinOp(">")),
-                _ => {
-                    if c.is_whitespace() {
-                        continue;
-                    } else if c.is_alphabetic() {
-                        tokens
-                            .push(get_keyword_or_ident(string, &mut chars, i))
-                    } else if c.is_digit(RADIX) {
-                        tokens.push(get_num(string, &mut chars, i))
-                    } else {
-                        tokens.push(Token::Illegal(&string[i..i + 1]));
-                        return tokens;
-                    }
-                }
+                _ => do_other_char!(i, c),
             }
         } else {
             tokens.push(Token::EOF);
