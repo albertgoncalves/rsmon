@@ -25,7 +25,6 @@ export SHARED_FLAGS=(
     -W "unused-lifetimes"
     -W "unused-qualifications"
     -W "unused-results"
-    -W "variant-size-differences"
 )
 export RUST_BACKTRACE=0
 

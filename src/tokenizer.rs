@@ -2,7 +2,7 @@ use std::iter::Peekable;
 use std::str::CharIndices;
 
 #[derive(Debug, PartialEq)]
-enum Token<'a> {
+pub(crate) enum Token<'a> {
     EOF,
     LParen,
     RParen,
@@ -28,7 +28,7 @@ enum Token<'a> {
 
 const RADIX: u32 = 10;
 
-fn get_tokens(string: &str) -> Vec<Token<'_>> {
+pub(crate) fn get_tokens(string: &str) -> Vec<Token<'_>> {
     let mut tokens: Vec<Token<'_>> = Vec::with_capacity(string.len());
     let mut chars: Peekable<CharIndices<'_>> =
         string.char_indices().peekable();
@@ -130,7 +130,7 @@ mod tests {
     #[test]
     fn single_char_tokens() {
         assert_eq!(
-            get_tokens("=+(){},;"),
+            get_tokens("=+(){},;\n"),
             vec![
                 Token::Assign,
                 Token::BinOp("+"),
@@ -157,7 +157,7 @@ mod tests {
                  5 < 10 > 5;\
                  if (5 < 10) { return true; } else { return false; }
                  10 == 10;\
-                 10 != 9;"
+                 10 != 9;\n"
             ),
             vec![
                 Token::Let,
