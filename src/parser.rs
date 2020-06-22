@@ -28,17 +28,9 @@ enum Expression<'a> {
 }
 
 macro_rules! eat_token {
-    ($tokens:expr $(,)?) => {
+    ($tokens:expr $(,)?) => {{
         let _: Option<&Token<'_>> = $tokens.next();
-    };
-}
-
-macro_rules! break_if_not {
-    ($tokens:expr, $x:expr) => {
-        if $tokens.next() != Some(&$x) {
-            break;
-        }
-    };
+    }};
 }
 
 fn get_expr<'a, 'b>(
@@ -71,80 +63,75 @@ fn get_expr<'a, 'b>(
                     return None;
                 }
             }
-        }}
+        }};
     }
-    loop {
-        if let Some(t) = tokens.next() {
-            match t {
-                Token::Semicolon => return expression,
-                Token::Num(n) => expression = Some(Expression::Num(*n)),
-                Token::Ident(i) => expression = Some(Expression::Ident(i)),
-                Token::Minus => set_prefix!("-"),
-                Token::UnOp(o) => set_prefix!(*o),
-                _ => (),
-            }
+    if let Some(t) = tokens.next() {
+        match t {
+            Token::Num(n) => expression = Some(Expression::Num(*n)),
+            Token::Ident(i) => expression = Some(Expression::Ident(i)),
+            Token::Minus => set_prefix!("-"),
+            Token::UnOp(o) => set_prefix!(*o),
+            _ => (),
         }
-        if let Some(t) = tokens.peek() {
-            match t {
-                Token::Minus => set_infix!("-"),
-                Token::BinOp(o) => set_infix!(*o),
-                _ => (),
-            }
+    }
+    if let Some(t) = tokens.peek() {
+        match t {
+            Token::Minus => set_infix!("-"),
+            Token::BinOp(o) => set_infix!(*o),
+            _ => (),
         }
-        break;
     }
     expression
-}
-
-macro_rules! push_let {
-    ($tokens:expr, $ast:expr $(,)?) => {{
-        let ident: &str = if let Some(Token::Ident(i)) = $tokens.next() {
-            i
-        } else {
-            break;
-        };
-        break_if_not!($tokens, Token::Assign);
-        let value: Expression<'_> = if let Some(x) = get_expr(&mut $tokens) {
-            x
-        } else {
-            break;
-        };
-        break_if_not!($tokens, Token::Semicolon);
-        $ast.push(Statement::Let { ident, value });
-    }};
-}
-
-macro_rules! push_return {
-    ($tokens:expr, $ast:expr $(,)?) => {{
-        let expression: Expression<'_> =
-            if let Some(x) = get_expr(&mut $tokens) {
-                x
-            } else {
-                break;
-            };
-        break_if_not!($tokens, Token::Semicolon);
-        $ast.push(Statement::Return(expression));
-    }};
 }
 
 fn get_ast<'a>(tokens: &[Token<'a>]) -> Option<Vec<Statement<'a>>> {
     let mut ast: Vec<Statement<'_>> = Vec::with_capacity(tokens.len());
     let mut tokens: Peekable<Iter<'_, Token<'_>>> = tokens.iter().peekable();
+    macro_rules! get_expr_or_break {
+        () => {
+            if let Some(x) = get_expr(&mut tokens) {
+                x
+            } else {
+                break;
+            };
+        };
+    }
+    macro_rules! break_if_not {
+        ($x:expr) => {
+            if tokens.next() != Some(&$x) {
+                break;
+            }
+        };
+    }
     loop {
         if let Some(t) = tokens.peek() {
             match t {
                 Token::EOF => return Some(ast),
                 Token::Let => {
                     eat_token!(tokens);
-                    push_let!(tokens, ast);
+                    let ident: &str =
+                        if let Some(Token::Ident(i)) = tokens.next() {
+                            i
+                        } else {
+                            break;
+                        };
+                    break_if_not!(Token::Assign);
+                    let value: Expression<'_> = get_expr_or_break!();
+                    break_if_not!(Token::Semicolon);
+                    ast.push(Statement::Let { ident, value });
                 }
                 Token::Return => {
                     eat_token!(tokens);
-                    push_return!(tokens, ast);
+                    let expression: Expression<'_> = get_expr_or_break!();
+                    break_if_not!(Token::Semicolon);
+                    ast.push(Statement::Return(expression));
                 }
                 _ => {
                     if let Some(x) = get_expr(&mut tokens) {
+                        break_if_not!(Token::Semicolon);
                         ast.push(Statement::Orphan(x));
+                    } else {
+                        break;
                     }
                 }
             }
@@ -238,6 +225,8 @@ mod tests {
         "x;\n",
         Some(vec![Statement::Orphan(Expression::Ident("x"))]),
     );
+
+    test_all_eq!(fail_orphan_ident, &["x\n", "x; y\n"], None);
 
     test_eq!(
         orphan_negative_num,
