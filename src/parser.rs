@@ -1,6 +1,5 @@
 use crate::tokenizer::Token;
 use std::iter::Peekable;
-use std::rc::Rc;
 use std::slice::Iter;
 
 #[derive(Debug, PartialEq)]
@@ -13,18 +12,18 @@ enum Statement<'a> {
     Orphan(Expression<'a>),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 enum Expression<'a> {
     Num(u8),
     Ident(&'a str),
     Prefix {
         op: &'a str,
-        value: Rc<Expression<'a>>,
+        value: Box<Expression<'a>>,
     },
     Infix {
         op: &'a str,
-        left: Rc<Expression<'a>>,
-        right: Rc<Expression<'a>>,
+        left: Box<Expression<'a>>,
+        right: Box<Expression<'a>>,
     },
 }
 
@@ -36,7 +35,7 @@ macro_rules! eat_token {
 
 fn get_prefix_precedence(op: &str) -> u8 {
     match op {
-        "-" => 9,
+        "-" | "!" => 9,
         _ => 0,
     }
 }
@@ -61,7 +60,7 @@ fn get_expr<'a, 'b>(
             if let Some(x) = get_expr(tokens, get_prefix_precedence($op)) {
                 expression = Some(Expression::Prefix {
                     op: $op,
-                    value: Rc::new(x),
+                    value: Box::new(x),
                 });
             } else {
                 return None;
@@ -87,18 +86,19 @@ fn get_expr<'a, 'b>(
      *  `https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html`.
      */
     macro_rules! set_infix {
-        ($op:expr, $op_precedence:expr $(,)?) => {{
-            if $op_precedence < precedence {
+        ($op:expr $(,)?) => {{
+            let op_precedence: u8 = get_infix_precedence($op);
+            if op_precedence < precedence {
                 break;
             }
             eat_token!(tokens);
             if let (Some(left), Some(right)) =
-                (expression.clone(), get_expr(tokens, $op_precedence + 1))
+                (expression, get_expr(tokens, op_precedence + 1))
             {
                 expression = Some(Expression::Infix {
                     op: $op,
-                    left: Rc::new(left),
-                    right: Rc::new(right),
+                    left: Box::new(left),
+                    right: Box::new(right),
                 });
             } else {
                 return None;
@@ -109,8 +109,8 @@ fn get_expr<'a, 'b>(
         match t {
             Token::Semicolon => break,
             Token::RParen => return expression,
-            Token::Minus => set_infix!("-", get_infix_precedence("-")),
-            Token::BinOp(o) => set_infix!(*o, get_infix_precedence(*o)),
+            Token::Minus => set_infix!("-"),
+            Token::BinOp(o) => set_infix!(*o),
             _ => eat_token!(tokens),
         }
     }
@@ -179,7 +179,6 @@ fn get_ast<'a>(tokens: &[Token<'a>]) -> Option<Vec<Statement<'a>>> {
 mod tests {
     use super::{get_ast, Expression, Statement};
     use crate::tokenizer::get_tokens;
-    use std::rc::Rc;
 
     macro_rules! test_eq {
         ($test:ident, $input:expr, $output:expr $(,)?) => {
@@ -267,7 +266,7 @@ mod tests {
         "-1;\n",
         Some(vec![Statement::Orphan(Expression::Prefix {
             op: "-",
-            value: Rc::new(Expression::Num(1)),
+            value: Box::new(Expression::Num(1)),
         })]),
     );
 
@@ -276,7 +275,7 @@ mod tests {
         "-x;\n",
         Some(vec![Statement::Orphan(Expression::Prefix {
             op: "-",
-            value: Rc::new(Expression::Ident("x")),
+            value: Box::new(Expression::Ident("x")),
         })]),
     );
 
@@ -287,7 +286,7 @@ mod tests {
             ident: "x",
             value: Expression::Prefix {
                 op: "-",
-                value: Rc::new(Expression::Num(1)),
+                value: Box::new(Expression::Num(1)),
             },
         }]),
     );
@@ -299,7 +298,7 @@ mod tests {
             ident: "x",
             value: Expression::Prefix {
                 op: "-",
-                value: Rc::new(Expression::Ident("y")),
+                value: Box::new(Expression::Ident("y")),
             },
         }]),
     );
@@ -309,7 +308,7 @@ mod tests {
         "!x;\n",
         Some(vec![Statement::Orphan(Expression::Prefix {
             op: "!",
-            value: Rc::new(Expression::Ident("x")),
+            value: Box::new(Expression::Ident("x")),
         })]),
     );
 
@@ -320,7 +319,7 @@ mod tests {
             ident: "x",
             value: Expression::Prefix {
                 op: "!",
-                value: Rc::new(Expression::Ident("y")),
+                value: Box::new(Expression::Ident("y")),
             },
         }]),
     );
@@ -332,8 +331,8 @@ mod tests {
             ident: "x",
             value: Expression::Infix {
                 op: "+",
-                left: Rc::new(Expression::Num(2)),
-                right: Rc::new(Expression::Num(1)),
+                left: Box::new(Expression::Num(2)),
+                right: Box::new(Expression::Num(1)),
             },
         }]),
     );
@@ -345,8 +344,8 @@ mod tests {
             ident: "x",
             value: Expression::Infix {
                 op: "-",
-                left: Rc::new(Expression::Num(2)),
-                right: Rc::new(Expression::Num(1)),
+                left: Box::new(Expression::Num(2)),
+                right: Box::new(Expression::Num(1)),
             },
         }]),
     );
@@ -358,12 +357,12 @@ mod tests {
             ident: "x",
             value: Expression::Infix {
                 op: "*",
-                left: Rc::new(Expression::Infix {
+                left: Box::new(Expression::Infix {
                     op: "+",
-                    left: Rc::new(Expression::Num(1)),
-                    right: Rc::new(Expression::Num(2)),
+                    left: Box::new(Expression::Num(1)),
+                    right: Box::new(Expression::Num(2)),
                 }),
-                right: Rc::new(Expression::Num(3)),
+                right: Box::new(Expression::Num(3)),
             },
         }]),
     );
@@ -375,20 +374,20 @@ mod tests {
             ident: "x",
             value: Expression::Infix {
                 op: "/",
-                left: Rc::new(Expression::Infix {
+                left: Box::new(Expression::Infix {
                     op: "-",
-                    left: Rc::new(Expression::Infix {
+                    left: Box::new(Expression::Infix {
                         op: "*",
-                        left: Rc::new(Expression::Infix {
+                        left: Box::new(Expression::Infix {
                             op: "+",
-                            left: Rc::new(Expression::Num(1)),
-                            right: Rc::new(Expression::Num(2)),
+                            left: Box::new(Expression::Num(1)),
+                            right: Box::new(Expression::Num(2)),
                         }),
-                        right: Rc::new(Expression::Num(3)),
+                        right: Box::new(Expression::Num(3)),
                     }),
-                    right: Rc::new(Expression::Num(4)),
+                    right: Box::new(Expression::Num(4)),
                 }),
-                right: Rc::new(Expression::Num(5)),
+                right: Box::new(Expression::Num(5)),
             },
         }]),
     );
@@ -400,23 +399,23 @@ mod tests {
             ident: "x",
             value: Expression::Infix {
                 op: "-",
-                left: Rc::new(Expression::Infix {
+                left: Box::new(Expression::Infix {
                     op: "/",
-                    left: Rc::new(Expression::Infix {
+                    left: Box::new(Expression::Infix {
                         op: "+",
-                        left: Rc::new(Expression::Num(1)),
-                        right: Rc::new(Expression::Infix {
+                        left: Box::new(Expression::Num(1)),
+                        right: Box::new(Expression::Infix {
                             op: "*",
-                            left: Rc::new(Expression::Num(2)),
-                            right: Rc::new(Expression::Num(3)),
+                            left: Box::new(Expression::Num(2)),
+                            right: Box::new(Expression::Num(3)),
                         }),
                     }),
-                    right: Rc::new(Expression::Num(4)),
+                    right: Box::new(Expression::Num(4)),
                 }),
-                right: Rc::new(Expression::Infix {
+                right: Box::new(Expression::Infix {
                     op: "*",
-                    left: Rc::new(Expression::Num(5)),
-                    right: Rc::new(Expression::Num(6)),
+                    left: Box::new(Expression::Num(5)),
+                    right: Box::new(Expression::Num(6)),
                 }),
             },
         }]),
@@ -440,12 +439,12 @@ mod tests {
             ident: "x",
             value: Expression::Infix {
                 op: "+",
-                left: Rc::new(Expression::Infix {
+                left: Box::new(Expression::Infix {
                     op: "+",
-                    left: Rc::new(Expression::Num(1)),
-                    right: Rc::new(Expression::Num(2)),
+                    left: Box::new(Expression::Num(1)),
+                    right: Box::new(Expression::Num(2)),
                 }),
-                right: Rc::new(Expression::Num(3)),
+                right: Box::new(Expression::Num(3)),
             },
         }]),
     );
@@ -457,11 +456,11 @@ mod tests {
             ident: "x",
             value: Expression::Infix {
                 op: "+",
-                left: Rc::new(Expression::Num(1)),
-                right: Rc::new(Expression::Infix {
+                left: Box::new(Expression::Num(1)),
+                right: Box::new(Expression::Infix {
                     op: "*",
-                    left: Rc::new(Expression::Num(2)),
-                    right: Rc::new(Expression::Num(3)),
+                    left: Box::new(Expression::Num(2)),
+                    right: Box::new(Expression::Num(3)),
                 }),
             },
         }]),
@@ -474,12 +473,12 @@ mod tests {
             ident: "x",
             value: Expression::Infix {
                 op: "+",
-                left: Rc::new(Expression::Infix {
+                left: Box::new(Expression::Infix {
                     op: "*",
-                    left: Rc::new(Expression::Num(1)),
-                    right: Rc::new(Expression::Num(2)),
+                    left: Box::new(Expression::Num(1)),
+                    right: Box::new(Expression::Num(2)),
                 }),
-                right: Rc::new(Expression::Num(3)),
+                right: Box::new(Expression::Num(3)),
             },
         }]),
     );
@@ -491,20 +490,20 @@ mod tests {
             ident: "x",
             value: Expression::Infix {
                 op: "+",
-                left: Rc::new(Expression::Infix {
+                left: Box::new(Expression::Infix {
                     op: "*",
-                    left: Rc::new(Expression::Prefix {
+                    left: Box::new(Expression::Prefix {
                         op: "-",
-                        value: Rc::new(Expression::Num(1)),
+                        value: Box::new(Expression::Num(1)),
                     }),
-                    right: Rc::new(Expression::Prefix {
+                    right: Box::new(Expression::Prefix {
                         op: "-",
-                        value: Rc::new(Expression::Num(2)),
+                        value: Box::new(Expression::Num(2)),
                     }),
                 }),
-                right: Rc::new(Expression::Prefix {
+                right: Box::new(Expression::Prefix {
                     op: "-",
-                    value: Rc::new(Expression::Num(3)),
+                    value: Box::new(Expression::Num(3)),
                 }),
             },
         }]),
@@ -515,21 +514,63 @@ mod tests {
         "1 < -2 != 3 > -4;",
         Some(vec![Statement::Orphan(Expression::Infix {
             op: "!=",
-            left: Rc::new(Expression::Infix {
+            left: Box::new(Expression::Infix {
                 op: "<",
-                left: Rc::new(Expression::Num(1)),
-                right: Rc::new(Expression::Prefix {
+                left: Box::new(Expression::Num(1)),
+                right: Box::new(Expression::Prefix {
                     op: "-",
-                    value: Rc::new(Expression::Num(2)),
+                    value: Box::new(Expression::Num(2)),
                 })
             }),
-            right: Rc::new(Expression::Infix {
+            right: Box::new(Expression::Infix {
                 op: ">",
-                left: Rc::new(Expression::Num(3)),
-                right: Rc::new(Expression::Prefix {
+                left: Box::new(Expression::Num(3)),
+                right: Box::new(Expression::Prefix {
                     op: "-",
-                    value: Rc::new(Expression::Num(4)),
+                    value: Box::new(Expression::Num(4)),
                 }),
+            }),
+        })]),
+    );
+
+    test_eq!(
+        conditional_precedence_parens,
+        "!(1 < -2 == !(3 > -4));",
+        Some(vec![Statement::Orphan(Expression::Prefix {
+            op: "!",
+            value: Box::new(Expression::Infix {
+                op: "==",
+                left: Box::new(Expression::Infix {
+                    op: "<",
+                    left: Box::new(Expression::Num(1)),
+                    right: Box::new(Expression::Prefix {
+                        op: "-",
+                        value: Box::new(Expression::Num(2)),
+                    })
+                }),
+                right: Box::new(Expression::Prefix {
+                    op: "!",
+                    value: Box::new(Expression::Infix {
+                        op: ">",
+                        left: Box::new(Expression::Num(3)),
+                        right: Box::new(Expression::Prefix {
+                            op: "-",
+                            value: Box::new(Expression::Num(4)),
+                        }),
+                    }),
+                }),
+            }),
+        })]),
+    );
+
+    test_eq!(
+        stacked_prefix,
+        "!-1;",
+        Some(vec![Statement::Orphan(Expression::Prefix {
+            op: "!",
+            value: Box::new(Expression::Prefix {
+                op: "-",
+                value: Box::new(Expression::Num(1)),
             }),
         })]),
     );
