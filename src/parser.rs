@@ -186,21 +186,58 @@ mod tests {
     use super::{get_ast, Expression, Statement};
     use crate::tokenizer::get_tokens;
 
-    macro_rules! test_eq {
-        ($test:ident, $input:expr, $output:expr $(,)?) => {
-            #[test]
-            fn $test() {
-                assert_eq!(get_ast(&get_tokens($input)), $output)
+    macro_rules! stmt {
+        (Let, $ident:expr, $value:expr $(,)?) => {
+            Statement::Let {
+                ident: $ident,
+                value: $value,
+            }
+        };
+        (Return, $expr:expr $(,)?) => {
+            Statement::Return($expr)
+        };
+        (Orphan, $expr:expr $(,)?) => {
+            Statement::Orphan($expr)
+        };
+    }
+
+    macro_rules! expr {
+        (Num, $n:expr $(,)?) => {
+            Expression::Num($n)
+        };
+        (Ident, $i:expr $(,)?) => {
+            Expression::Ident($i)
+        };
+        (Prefix, $op:expr, $value:expr $(,)?) => {
+            Expression::Prefix {
+                op: $op,
+                value: Box::new($value),
+            }
+        };
+        (Infix, $op:expr, $left:expr, $right:expr $(,)?) => {
+            Expression::Infix {
+                op: $op,
+                left: Box::new($left),
+                right: Box::new($right),
             }
         };
     }
 
-    macro_rules! test_all_eq {
-        ($test:ident, $inputs:expr, $output:expr $(,)?) => {
+    macro_rules! test_eq {
+        ($test:ident, $input:expr, $output:expr $(,)?) => {
+            #[test]
+            fn $test() {
+                assert_eq!(get_ast(&get_tokens($input)), Some($output))
+            }
+        };
+    }
+
+    macro_rules! test_all_none {
+        ($test:ident, $inputs:expr $(,)?) => {
             #[test]
             fn $test() {
                 for x in $inputs {
-                    assert_eq!(get_ast(&get_tokens(x)), $output);
+                    assert_eq!(get_ast(&get_tokens(x)), None);
                 }
             }
         };
@@ -209,19 +246,13 @@ mod tests {
     test_eq!(
         let_statements,
         "let x = 5;\nlet y = x;\n",
-        Some(vec![
-            Statement::Let {
-                ident: "x",
-                value: Expression::Num(5),
-            },
-            Statement::Let {
-                ident: "y",
-                value: Expression::Ident("x"),
-            },
-        ]),
+        vec![
+            stmt!(Let, "x", expr!(Num, 5)),
+            stmt!(Let, "y", expr!(Ident, "x")),
+        ],
     );
 
-    test_all_eq!(
+    test_all_none!(
         fail_let_statement,
         &[
             "let x;\n",
@@ -230,204 +261,153 @@ mod tests {
             "let x 10;\n",
             "let x = 5;\nlet y =;\n",
         ],
-        None,
     );
 
     test_eq!(
         return_statement,
         "return 5;\n",
-        Some(vec![Statement::Return(Expression::Num(5))]),
+        vec![stmt!(Return, expr!(Num, 5))],
     );
 
     test_eq!(
         let_return_statement,
         "let x = 5;\nreturn x;\n",
-        Some(vec![
-            Statement::Let {
-                ident: "x",
-                value: Expression::Num(5),
-            },
-            Statement::Return(Expression::Ident("x")),
-        ]),
+        vec![
+            stmt!(Let, "x", expr!(Num, 5)),
+            stmt!(Return, expr!(Ident, "x")),
+        ],
     );
 
-    test_eq!(fail_return_statement, "return;\n", None);
+    test_all_none!(fail_return_statement, &["return;\n", "return\n"]);
 
-    test_eq!(
-        orphan_num,
-        "1;\n",
-        Some(vec![Statement::Orphan(Expression::Num(1))])
-    );
+    test_eq!(orphan_num, "1;\n", vec![stmt!(Orphan, expr!(Num, 1))]);
 
-    test_eq!(
-        orphan_ident,
-        "x;\n",
-        Some(vec![Statement::Orphan(Expression::Ident("x"))]),
-    );
+    test_eq!(orphan_ident, "x;\n", vec![stmt!(Orphan, expr!(Ident, "x"))]);
 
-    test_all_eq!(fail_orphan_ident, &["x\n", "x; y\n"], None);
+    test_all_none!(fail_orphan_ident, &["x\n", "x; y\n"]);
 
     test_eq!(
         orphan_negative_num,
         "-1;\n",
-        Some(vec![Statement::Orphan(Expression::Prefix {
-            op: "-",
-            value: Box::new(Expression::Num(1)),
-        })]),
+        vec![stmt!(Orphan, expr!(Prefix, "-", expr!(Num, 1)))],
     );
 
     test_eq!(
         orphan_negative_ident,
         "-x;\n",
-        Some(vec![Statement::Orphan(Expression::Prefix {
-            op: "-",
-            value: Box::new(Expression::Ident("x")),
-        })]),
+        vec![stmt!(Orphan, expr!(Prefix, "-", expr!(Ident, "x")))],
     );
 
     test_eq!(
         let_negative_num,
         "let x = -1;\n",
-        Some(vec![Statement::Let {
-            ident: "x",
-            value: Expression::Prefix {
-                op: "-",
-                value: Box::new(Expression::Num(1)),
-            },
-        }]),
+        vec![stmt!(Let, "x", expr!(Prefix, "-", expr!(Num, 1)))],
     );
 
     test_eq!(
         let_negative_ident,
         "let x = -y;\n",
-        Some(vec![Statement::Let {
-            ident: "x",
-            value: Expression::Prefix {
-                op: "-",
-                value: Box::new(Expression::Ident("y")),
-            },
-        }]),
+        vec![stmt!(Let, "x", expr!(Prefix, "-", expr!(Ident, "y")))],
     );
 
     test_eq!(
         orphan_bang_ident,
         "!x;\n",
-        Some(vec![Statement::Orphan(Expression::Prefix {
-            op: "!",
-            value: Box::new(Expression::Ident("x")),
-        })]),
+        vec![stmt!(Orphan, expr!(Prefix, "!", expr!(Ident, "x")))],
     );
 
     test_eq!(
         let_bang_ident,
         "let x = !y;\n",
-        Some(vec![Statement::Let {
-            ident: "x",
-            value: Expression::Prefix {
-                op: "!",
-                value: Box::new(Expression::Ident("y")),
-            },
-        }]),
+        vec![stmt!(Let, "x", expr!(Prefix, "!", expr!(Ident, "y")))],
     );
 
     test_eq!(
         let_infix_add_nums,
         "let x = 2 + 1;\n",
-        Some(vec![Statement::Let {
-            ident: "x",
-            value: Expression::Infix {
-                op: "+",
-                left: Box::new(Expression::Num(2)),
-                right: Box::new(Expression::Num(1)),
-            },
-        }]),
+        vec![stmt!(
+            Let,
+            "x",
+            expr!(Infix, "+", expr!(Num, 2), expr!(Num, 1)),
+        )],
     );
 
     test_eq!(
         let_infix_sub_nums,
         "let x = 2 - 1;\n",
-        Some(vec![Statement::Let {
-            ident: "x",
-            value: Expression::Infix {
-                op: "-",
-                left: Box::new(Expression::Num(2)),
-                right: Box::new(Expression::Num(1)),
-            },
-        }]),
+        vec![stmt!(
+            Let,
+            "x",
+            expr!(Infix, "-", expr!(Num, 2), expr!(Num, 1)),
+        )],
     );
 
     test_eq!(
         let_parens_infix,
         "let x = (1 + 2) * 3;\n",
-        Some(vec![Statement::Let {
-            ident: "x",
-            value: Expression::Infix {
-                op: "*",
-                left: Box::new(Expression::Infix {
-                    op: "+",
-                    left: Box::new(Expression::Num(1)),
-                    right: Box::new(Expression::Num(2)),
-                }),
-                right: Box::new(Expression::Num(3)),
-            },
-        }]),
+        vec![stmt!(
+            Let,
+            "x",
+            expr!(
+                Infix,
+                "*",
+                expr!(Infix, "+", expr!(Num, 1), expr!(Num, 2)),
+                expr!(Num, 3),
+            ),
+        )],
     );
 
     test_eq!(
         let_many_parens_infix,
         "let x = (((1 + 2) * 3) - 4) / 5;\n",
-        Some(vec![Statement::Let {
-            ident: "x",
-            value: Expression::Infix {
-                op: "/",
-                left: Box::new(Expression::Infix {
-                    op: "-",
-                    left: Box::new(Expression::Infix {
-                        op: "*",
-                        left: Box::new(Expression::Infix {
-                            op: "+",
-                            left: Box::new(Expression::Num(1)),
-                            right: Box::new(Expression::Num(2)),
-                        }),
-                        right: Box::new(Expression::Num(3)),
-                    }),
-                    right: Box::new(Expression::Num(4)),
-                }),
-                right: Box::new(Expression::Num(5)),
-            },
-        }]),
+        vec![stmt!(
+            Let,
+            "x",
+            expr!(
+                Infix,
+                "/",
+                expr!(
+                    Infix,
+                    "-",
+                    expr!(
+                        Infix,
+                        "*",
+                        expr!(Infix, "+", expr!(Num, 1), expr!(Num, 2)),
+                        expr!(Num, 3),
+                    ),
+                    expr!(Num, 4),
+                ),
+                expr!(Num, 5),
+            ),
+        )]
     );
 
     test_eq!(
         let_many_precedence_parens_infix,
         "let x = ((1 + 2 * 3) / 4) - 5 * 6 ;\n",
-        Some(vec![Statement::Let {
-            ident: "x",
-            value: Expression::Infix {
-                op: "-",
-                left: Box::new(Expression::Infix {
-                    op: "/",
-                    left: Box::new(Expression::Infix {
-                        op: "+",
-                        left: Box::new(Expression::Num(1)),
-                        right: Box::new(Expression::Infix {
-                            op: "*",
-                            left: Box::new(Expression::Num(2)),
-                            right: Box::new(Expression::Num(3)),
-                        }),
-                    }),
-                    right: Box::new(Expression::Num(4)),
-                }),
-                right: Box::new(Expression::Infix {
-                    op: "*",
-                    left: Box::new(Expression::Num(5)),
-                    right: Box::new(Expression::Num(6)),
-                }),
-            },
-        }]),
+        vec![stmt!(
+            Let,
+            "x",
+            expr!(
+                Infix,
+                "-",
+                expr!(
+                    Infix,
+                    "/",
+                    expr!(
+                        Infix,
+                        "+",
+                        expr!(Num, 1),
+                        expr!(Infix, "*", expr!(Num, 2), expr!(Num, 3)),
+                    ),
+                    expr!(Num, 4),
+                ),
+                expr!(Infix, "*", expr!(Num, 5), expr!(Num, 6)),
+            ),
+        )],
     );
 
-    test_all_eq!(
+    test_all_none!(
         fail_many_parens_infix,
         &[
             "let x = (((1 + 2) * 3) - 4) / 5);\n",
@@ -435,149 +415,135 @@ mod tests {
             "let x = (((1 + 2 * 3) - 4) / 5;\n",
             "let x = ((1 + 2) * 3) - 4) / 5;\n",
         ],
-        None,
     );
 
     test_eq!(
         let_infix_add_precedence,
         "let x = 1 + 2 + 3;\n",
-        Some(vec![Statement::Let {
-            ident: "x",
-            value: Expression::Infix {
-                op: "+",
-                left: Box::new(Expression::Infix {
-                    op: "+",
-                    left: Box::new(Expression::Num(1)),
-                    right: Box::new(Expression::Num(2)),
-                }),
-                right: Box::new(Expression::Num(3)),
-            },
-        }]),
+        vec![stmt!(
+            Let,
+            "x",
+            expr!(
+                Infix,
+                "+",
+                expr!(Infix, "+", expr!(Num, 1), expr!(Num, 2)),
+                expr!(Num, 3),
+            ),
+        )],
     );
 
     test_eq!(
         let_infix_add_mul_precedence,
         "let x = 1 + 2 * 3;\n",
-        Some(vec![Statement::Let {
-            ident: "x",
-            value: Expression::Infix {
-                op: "+",
-                left: Box::new(Expression::Num(1)),
-                right: Box::new(Expression::Infix {
-                    op: "*",
-                    left: Box::new(Expression::Num(2)),
-                    right: Box::new(Expression::Num(3)),
-                }),
-            },
-        }]),
+        vec![stmt!(
+            Let,
+            "x",
+            expr!(
+                Infix,
+                "+",
+                expr!(Num, 1),
+                expr!(Infix, "*", expr!(Num, 2), expr!(Num, 3)),
+            ),
+        )],
     );
 
     test_eq!(
         let_infix_mul_add_precedence,
         "let x = 1 * 2 + 3;\n",
-        Some(vec![Statement::Let {
-            ident: "x",
-            value: Expression::Infix {
-                op: "+",
-                left: Box::new(Expression::Infix {
-                    op: "*",
-                    left: Box::new(Expression::Num(1)),
-                    right: Box::new(Expression::Num(2)),
-                }),
-                right: Box::new(Expression::Num(3)),
-            },
-        }]),
+        vec![stmt!(
+            Let,
+            "x",
+            expr!(
+                Infix,
+                "+",
+                expr!(Infix, "*", expr!(Num, 1), expr!(Num, 2)),
+                expr!(Num, 3),
+            ),
+        )],
     );
 
     test_eq!(
         let_infix_mul_add_negative_precedence,
         "let x = -1 * -2 + -3;\n",
-        Some(vec![Statement::Let {
-            ident: "x",
-            value: Expression::Infix {
-                op: "+",
-                left: Box::new(Expression::Infix {
-                    op: "*",
-                    left: Box::new(Expression::Prefix {
-                        op: "-",
-                        value: Box::new(Expression::Num(1)),
-                    }),
-                    right: Box::new(Expression::Prefix {
-                        op: "-",
-                        value: Box::new(Expression::Num(2)),
-                    }),
-                }),
-                right: Box::new(Expression::Prefix {
-                    op: "-",
-                    value: Box::new(Expression::Num(3)),
-                }),
-            },
-        }]),
+        vec![stmt!(
+            Let,
+            "x",
+            expr!(
+                Infix,
+                "+",
+                expr!(
+                    Infix,
+                    "*",
+                    expr!(Prefix, "-", expr!(Num, 1)),
+                    expr!(Prefix, "-", expr!(Num, 2)),
+                ),
+                expr!(Prefix, "-", expr!(Num, 3)),
+            ),
+        )],
     );
 
     test_eq!(
         conditional_precedence,
         "1 < -2 != 3 > -4;",
-        Some(vec![Statement::Orphan(Expression::Infix {
-            op: "!=",
-            left: Box::new(Expression::Infix {
-                op: "<",
-                left: Box::new(Expression::Num(1)),
-                right: Box::new(Expression::Prefix {
-                    op: "-",
-                    value: Box::new(Expression::Num(2)),
-                })
-            }),
-            right: Box::new(Expression::Infix {
-                op: ">",
-                left: Box::new(Expression::Num(3)),
-                right: Box::new(Expression::Prefix {
-                    op: "-",
-                    value: Box::new(Expression::Num(4)),
-                }),
-            }),
-        })]),
+        vec![stmt!(
+            Orphan,
+            expr!(
+                Infix,
+                "!=",
+                expr!(
+                    Infix,
+                    "<",
+                    expr!(Num, 1),
+                    expr!(Prefix, "-", expr!(Num, 2)),
+                ),
+                expr!(
+                    Infix,
+                    ">",
+                    expr!(Num, 3),
+                    expr!(Prefix, "-", expr!(Num, 4)),
+                ),
+            ),
+        )],
     );
 
     test_eq!(
         conditional_precedence_parens,
         "!(1 < -2 == !(3 > -4));",
-        Some(vec![Statement::Orphan(Expression::Prefix {
-            op: "!",
-            value: Box::new(Expression::Infix {
-                op: "==",
-                left: Box::new(Expression::Infix {
-                    op: "<",
-                    left: Box::new(Expression::Num(1)),
-                    right: Box::new(Expression::Prefix {
-                        op: "-",
-                        value: Box::new(Expression::Num(2)),
-                    })
-                }),
-                right: Box::new(Expression::Prefix {
-                    op: "!",
-                    value: Box::new(Expression::Infix {
-                        op: ">",
-                        left: Box::new(Expression::Num(3)),
-                        right: Box::new(Expression::Prefix {
-                            op: "-",
-                            value: Box::new(Expression::Num(4)),
-                        }),
-                    }),
-                }),
-            }),
-        })]),
+        vec![stmt!(
+            Orphan,
+            expr!(
+                Prefix,
+                "!",
+                expr!(
+                    Infix,
+                    "==",
+                    expr!(
+                        Infix,
+                        "<",
+                        expr!(Num, 1),
+                        expr!(Prefix, "-", expr!(Num, 2)),
+                    ),
+                    expr!(
+                        Prefix,
+                        "!",
+                        expr!(
+                            Infix,
+                            ">",
+                            expr!(Num, 3),
+                            expr!(Prefix, "-", expr!(Num, 4)),
+                        ),
+                    ),
+                ),
+            ),
+        )],
     );
 
     test_eq!(
         stacked_prefix,
         "!-1;",
-        Some(vec![Statement::Orphan(Expression::Prefix {
-            op: "!",
-            value: Box::new(Expression::Prefix {
-                op: "-",
-                value: Box::new(Expression::Num(1)),
-            }),
-        })]),
+        vec![stmt!(
+            Orphan,
+            expr!(Prefix, "!", expr!(Prefix, "-", expr!(Num, 1))),
+        )],
     );
 }
