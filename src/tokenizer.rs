@@ -32,6 +32,7 @@ pub(crate) fn get_tokens(string: &str) -> Vec<Token<'_>> {
     let mut tokens: Vec<Token<'_>> = Vec::with_capacity(string.len());
     let mut chars: Peekable<CharIndices<'_>> =
         string.char_indices().peekable();
+
     macro_rules! get_substring {
         ($fn:expr, $i:expr $(,)?) => {{
             let mut substring: &str = &string[$i..$i];
@@ -46,6 +47,7 @@ pub(crate) fn get_tokens(string: &str) -> Vec<Token<'_>> {
             substring
         }};
     }
+
     macro_rules! push_equality_or {
         ($bin_op:expr, $fallback:expr $(,)?) => {{
             if let Some((_, c)) = chars.peek() {
@@ -58,12 +60,14 @@ pub(crate) fn get_tokens(string: &str) -> Vec<Token<'_>> {
             tokens.push($fallback)
         }};
     }
+
     macro_rules! return_illegal {
         ($string:expr $(,)?) => {
             tokens.push(Token::Illegal($string));
             return tokens;
         };
     }
+
     macro_rules! do_other_char {
         ($i:expr, $c:expr $(,)?) => {{
             if $c.is_whitespace() {
@@ -97,6 +101,7 @@ pub(crate) fn get_tokens(string: &str) -> Vec<Token<'_>> {
             }
         }};
     }
+
     loop {
         if let Some((i, c)) = chars.next() {
             match c {

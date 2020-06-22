@@ -33,20 +33,20 @@ macro_rules! eat_token {
     }};
 }
 
-fn get_prefix_precedence(op: &str) -> u8 {
+fn get_prefix_binding_power(op: &str) -> u8 {
     match op {
         "-" | "!" => 9,
-        _ => 0,
+        _ => panic!(),
     }
 }
 
-fn get_infix_precedence(op: &str) -> u8 {
+fn get_infix_binding_power(op: &str) -> (u8, u8) {
     match op {
-        "*" | "/" => 7,
-        "+" | "-" => 5,
-        "<" | ">" => 3,
-        "==" | "!=" => 1,
-        _ => 0,
+        "*" | "/" => (7, 8),
+        "+" | "-" => (5, 6),
+        "<" | ">" => (3, 4),
+        "==" | "!=" => (1, 2),
+        _ => panic!(),
     }
 }
 
@@ -58,9 +58,10 @@ fn get_expr<'a, 'b>(
     precedence: u8,
 ) -> Option<Expression<'b>> {
     let mut expression: Option<Expression<'_>> = None;
+
     macro_rules! set_prefix {
         ($op:expr $(,)?) => {{
-            if let Some(x) = get_expr(tokens, get_prefix_precedence($op)) {
+            if let Some(x) = get_expr(tokens, get_prefix_binding_power($op)) {
                 expression = Some(Expression::Prefix {
                     op: $op,
                     value: Box::new(x),
@@ -70,6 +71,28 @@ fn get_expr<'a, 'b>(
             }
         }};
     }
+
+    macro_rules! set_infix {
+        ($op:expr $(,)?) => {{
+            let (l_power, r_power): (u8, u8) = get_infix_binding_power($op);
+            if l_power < precedence {
+                break;
+            }
+            eat_token!(tokens);
+            if let (Some(left), Some(right)) =
+                (expression, get_expr(tokens, r_power))
+            {
+                expression = Some(Expression::Infix {
+                    op: $op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                });
+            } else {
+                return None;
+            }
+        }};
+    }
+
     if let Some(t) = tokens.next() {
         match t {
             Token::LParen => {
@@ -82,28 +105,8 @@ fn get_expr<'a, 'b>(
             Token::Ident(i) => expression = Some(Expression::Ident(i)),
             Token::Minus => set_prefix!("-"),
             Token::UnOp(o) => set_prefix!(*o),
-            _ => (),
+            _ => return None,
         }
-    }
-    macro_rules! set_infix {
-        ($op:expr $(,)?) => {{
-            let op_precedence: u8 = get_infix_precedence($op);
-            if op_precedence < precedence {
-                break;
-            }
-            eat_token!(tokens);
-            if let (Some(left), Some(right)) =
-                (expression, get_expr(tokens, op_precedence + 1))
-            {
-                expression = Some(Expression::Infix {
-                    op: $op,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                });
-            } else {
-                return None;
-            }
-        }};
     }
     while let Some(t) = tokens.peek() {
         match t {
@@ -120,6 +123,7 @@ fn get_expr<'a, 'b>(
 fn get_ast<'a>(tokens: &[Token<'a>]) -> Option<Vec<Statement<'a>>> {
     let mut ast: Vec<Statement<'_>> = Vec::with_capacity(tokens.len());
     let mut tokens: Peekable<Iter<'_, Token<'_>>> = tokens.iter().peekable();
+
     macro_rules! get_expr_or_break {
         () => {
             if let Some(x) = get_expr(&mut tokens, 0) {
@@ -129,6 +133,7 @@ fn get_ast<'a>(tokens: &[Token<'a>]) -> Option<Vec<Statement<'a>>> {
             };
         };
     }
+
     macro_rules! break_if_not {
         ($x:expr) => {
             if tokens.next() != Some(&$x) {
@@ -136,6 +141,7 @@ fn get_ast<'a>(tokens: &[Token<'a>]) -> Option<Vec<Statement<'a>>> {
             }
         };
     }
+
     loop {
         if let Some(t) = tokens.peek() {
             match t {
