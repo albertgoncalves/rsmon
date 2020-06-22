@@ -1,5 +1,6 @@
 use crate::tokenizer::Token;
 use std::iter::Peekable;
+use std::rc::Rc;
 use std::slice::Iter;
 
 #[derive(Debug, PartialEq)]
@@ -12,18 +13,18 @@ enum Statement<'a> {
     Orphan(Expression<'a>),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum Expression<'a> {
     Num(u8),
     Ident(&'a str),
     Prefix {
         op: &'a str,
-        value: Box<Expression<'a>>,
+        value: Rc<Expression<'a>>,
     },
     Infix {
         op: &'a str,
-        left: Box<Expression<'a>>,
-        right: Box<Expression<'a>>,
+        left: Rc<Expression<'a>>,
+        right: Rc<Expression<'a>>,
     },
 }
 
@@ -33,58 +34,84 @@ macro_rules! eat_token {
     }};
 }
 
+fn get_prefix_precedence(op: &str) -> u8 {
+    match op {
+        "-" => 9,
+        _ => 0,
+    }
+}
+
+fn get_infix_precedence(op: &str) -> u8 {
+    match op {
+        "*" | "/" => 7,
+        "+" | "-" => 5,
+        "<" | ">" => 3,
+        "==" | "!=" => 1,
+        _ => 0,
+    }
+}
+
 fn get_expr<'a, 'b>(
     tokens: &mut Peekable<Iter<'a, Token<'b>>>,
+    precedence: u8,
 ) -> Option<Expression<'b>> {
     let mut expression: Option<Expression<'_>> = None;
     macro_rules! set_prefix {
         ($op:expr $(,)?) => {{
-            if let Some(x) = get_expr(tokens) {
+            if let Some(x) = get_expr(tokens, get_prefix_precedence($op)) {
                 expression = Some(Expression::Prefix {
                     op: $op,
-                    value: Box::new(x),
+                    value: Rc::new(x),
                 });
             } else {
                 return None;
             }
         }};
     }
-    macro_rules! set_infix {
-        ($op:expr $(,)?) => {{
-            eat_token!(tokens);
-            if let Some(left) = expression {
-                if let Some(right) = get_expr(tokens) {
-                    expression = Some(Expression::Infix {
-                        op: $op,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    });
-                } else {
-                    return None;
-                }
-            }
-        }};
-    }
     if let Some(t) = tokens.next() {
         match t {
-            Token::Num(n) => expression = Some(Expression::Num(*n)),
-            Token::Ident(i) => expression = Some(Expression::Ident(i)),
-            Token::Minus => set_prefix!("-"),
-            Token::UnOp(o) => set_prefix!(*o),
             Token::LParen => {
-                expression = get_expr(tokens);
+                expression = get_expr(tokens, 0);
                 if tokens.next() != Some(&Token::RParen) {
                     return None;
                 }
             }
+            Token::Num(n) => expression = Some(Expression::Num(*n)),
+            Token::Ident(i) => expression = Some(Expression::Ident(i)),
+            Token::Minus => set_prefix!("-"),
+            Token::UnOp(o) => set_prefix!(*o),
             _ => (),
         }
     }
-    if let Some(t) = tokens.peek() {
+    /* NOTE: See
+     *  `https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html`.
+     */
+    macro_rules! set_infix {
+        ($op:expr, $op_precedence:expr $(,)?) => {{
+            if $op_precedence < precedence {
+                break;
+            }
+            eat_token!(tokens);
+            if let (Some(left), Some(right)) =
+                (expression.clone(), get_expr(tokens, $op_precedence + 1))
+            {
+                expression = Some(Expression::Infix {
+                    op: $op,
+                    left: Rc::new(left),
+                    right: Rc::new(right),
+                });
+            } else {
+                return None;
+            }
+        }};
+    }
+    while let Some(t) = tokens.peek() {
         match t {
-            Token::Minus => set_infix!("-"),
-            Token::BinOp(o) => set_infix!(*o),
-            _ => (),
+            Token::Semicolon => break,
+            Token::RParen => return expression,
+            Token::Minus => set_infix!("-", get_infix_precedence("-")),
+            Token::BinOp(o) => set_infix!(*o, get_infix_precedence(*o)),
+            _ => eat_token!(tokens),
         }
     }
     expression
@@ -95,7 +122,7 @@ fn get_ast<'a>(tokens: &[Token<'a>]) -> Option<Vec<Statement<'a>>> {
     let mut tokens: Peekable<Iter<'_, Token<'_>>> = tokens.iter().peekable();
     macro_rules! get_expr_or_break {
         () => {
-            if let Some(x) = get_expr(&mut tokens) {
+            if let Some(x) = get_expr(&mut tokens, 0) {
                 x
             } else {
                 break;
@@ -133,7 +160,7 @@ fn get_ast<'a>(tokens: &[Token<'a>]) -> Option<Vec<Statement<'a>>> {
                     ast.push(Statement::Return(expression));
                 }
                 _ => {
-                    if let Some(x) = get_expr(&mut tokens) {
+                    if let Some(x) = get_expr(&mut tokens, 0) {
                         break_if_not!(Token::Semicolon);
                         ast.push(Statement::Orphan(x));
                     } else {
@@ -152,6 +179,7 @@ fn get_ast<'a>(tokens: &[Token<'a>]) -> Option<Vec<Statement<'a>>> {
 mod tests {
     use super::{get_ast, Expression, Statement};
     use crate::tokenizer::get_tokens;
+    use std::rc::Rc;
 
     macro_rules! test_eq {
         ($test:ident, $input:expr, $output:expr $(,)?) => {
@@ -239,7 +267,7 @@ mod tests {
         "-1;\n",
         Some(vec![Statement::Orphan(Expression::Prefix {
             op: "-",
-            value: Box::new(Expression::Num(1)),
+            value: Rc::new(Expression::Num(1)),
         })]),
     );
 
@@ -248,7 +276,7 @@ mod tests {
         "-x;\n",
         Some(vec![Statement::Orphan(Expression::Prefix {
             op: "-",
-            value: Box::new(Expression::Ident("x")),
+            value: Rc::new(Expression::Ident("x")),
         })]),
     );
 
@@ -259,7 +287,7 @@ mod tests {
             ident: "x",
             value: Expression::Prefix {
                 op: "-",
-                value: Box::new(Expression::Num(1)),
+                value: Rc::new(Expression::Num(1)),
             },
         }]),
     );
@@ -271,7 +299,7 @@ mod tests {
             ident: "x",
             value: Expression::Prefix {
                 op: "-",
-                value: Box::new(Expression::Ident("y")),
+                value: Rc::new(Expression::Ident("y")),
             },
         }]),
     );
@@ -281,7 +309,7 @@ mod tests {
         "!x;\n",
         Some(vec![Statement::Orphan(Expression::Prefix {
             op: "!",
-            value: Box::new(Expression::Ident("x")),
+            value: Rc::new(Expression::Ident("x")),
         })]),
     );
 
@@ -292,7 +320,7 @@ mod tests {
             ident: "x",
             value: Expression::Prefix {
                 op: "!",
-                value: Box::new(Expression::Ident("y")),
+                value: Rc::new(Expression::Ident("y")),
             },
         }]),
     );
@@ -304,8 +332,8 @@ mod tests {
             ident: "x",
             value: Expression::Infix {
                 op: "+",
-                left: Box::new(Expression::Num(2)),
-                right: Box::new(Expression::Num(1)),
+                left: Rc::new(Expression::Num(2)),
+                right: Rc::new(Expression::Num(1)),
             },
         }]),
     );
@@ -317,8 +345,8 @@ mod tests {
             ident: "x",
             value: Expression::Infix {
                 op: "-",
-                left: Box::new(Expression::Num(2)),
-                right: Box::new(Expression::Num(1)),
+                left: Rc::new(Expression::Num(2)),
+                right: Rc::new(Expression::Num(1)),
             },
         }]),
     );
@@ -330,12 +358,12 @@ mod tests {
             ident: "x",
             value: Expression::Infix {
                 op: "*",
-                left: Box::new(Expression::Infix {
+                left: Rc::new(Expression::Infix {
                     op: "+",
-                    left: Box::new(Expression::Num(1)),
-                    right: Box::new(Expression::Num(2)),
+                    left: Rc::new(Expression::Num(1)),
+                    right: Rc::new(Expression::Num(2)),
                 }),
-                right: Box::new(Expression::Num(3)),
+                right: Rc::new(Expression::Num(3)),
             },
         }]),
     );
@@ -347,20 +375,49 @@ mod tests {
             ident: "x",
             value: Expression::Infix {
                 op: "/",
-                left: Box::new(Expression::Infix {
+                left: Rc::new(Expression::Infix {
                     op: "-",
-                    left: Box::new(Expression::Infix {
+                    left: Rc::new(Expression::Infix {
                         op: "*",
-                        left: Box::new(Expression::Infix {
+                        left: Rc::new(Expression::Infix {
                             op: "+",
-                            left: Box::new(Expression::Num(1)),
-                            right: Box::new(Expression::Num(2)),
+                            left: Rc::new(Expression::Num(1)),
+                            right: Rc::new(Expression::Num(2)),
                         }),
-                        right: Box::new(Expression::Num(3)),
+                        right: Rc::new(Expression::Num(3)),
                     }),
-                    right: Box::new(Expression::Num(4)),
+                    right: Rc::new(Expression::Num(4)),
                 }),
-                right: Box::new(Expression::Num(5)),
+                right: Rc::new(Expression::Num(5)),
+            },
+        }]),
+    );
+
+    test_eq!(
+        let_many_precedence_parens_infix,
+        "let x = ((1 + 2 * 3) / 4) - 5 * 6 ;\n",
+        Some(vec![Statement::Let {
+            ident: "x",
+            value: Expression::Infix {
+                op: "-",
+                left: Rc::new(Expression::Infix {
+                    op: "/",
+                    left: Rc::new(Expression::Infix {
+                        op: "+",
+                        left: Rc::new(Expression::Num(1)),
+                        right: Rc::new(Expression::Infix {
+                            op: "*",
+                            left: Rc::new(Expression::Num(2)),
+                            right: Rc::new(Expression::Num(3)),
+                        }),
+                    }),
+                    right: Rc::new(Expression::Num(4)),
+                }),
+                right: Rc::new(Expression::Infix {
+                    op: "*",
+                    left: Rc::new(Expression::Num(5)),
+                    right: Rc::new(Expression::Num(6)),
+                }),
             },
         }]),
     );
@@ -374,5 +431,106 @@ mod tests {
             "let x = ((1 + 2) * 3) - 4) / 5;\n",
         ],
         None,
+    );
+
+    test_eq!(
+        let_infix_add_precedence,
+        "let x = 1 + 2 + 3;\n",
+        Some(vec![Statement::Let {
+            ident: "x",
+            value: Expression::Infix {
+                op: "+",
+                left: Rc::new(Expression::Infix {
+                    op: "+",
+                    left: Rc::new(Expression::Num(1)),
+                    right: Rc::new(Expression::Num(2)),
+                }),
+                right: Rc::new(Expression::Num(3)),
+            },
+        }]),
+    );
+
+    test_eq!(
+        let_infix_add_mul_precedence,
+        "let x = 1 + 2 * 3;\n",
+        Some(vec![Statement::Let {
+            ident: "x",
+            value: Expression::Infix {
+                op: "+",
+                left: Rc::new(Expression::Num(1)),
+                right: Rc::new(Expression::Infix {
+                    op: "*",
+                    left: Rc::new(Expression::Num(2)),
+                    right: Rc::new(Expression::Num(3)),
+                }),
+            },
+        }]),
+    );
+
+    test_eq!(
+        let_infix_mul_add_precedence,
+        "let x = 1 * 2 + 3;\n",
+        Some(vec![Statement::Let {
+            ident: "x",
+            value: Expression::Infix {
+                op: "+",
+                left: Rc::new(Expression::Infix {
+                    op: "*",
+                    left: Rc::new(Expression::Num(1)),
+                    right: Rc::new(Expression::Num(2)),
+                }),
+                right: Rc::new(Expression::Num(3)),
+            },
+        }]),
+    );
+
+    test_eq!(
+        let_infix_mul_add_negative_precedence,
+        "let x = -1 * -2 + -3;\n",
+        Some(vec![Statement::Let {
+            ident: "x",
+            value: Expression::Infix {
+                op: "+",
+                left: Rc::new(Expression::Infix {
+                    op: "*",
+                    left: Rc::new(Expression::Prefix {
+                        op: "-",
+                        value: Rc::new(Expression::Num(1)),
+                    }),
+                    right: Rc::new(Expression::Prefix {
+                        op: "-",
+                        value: Rc::new(Expression::Num(2)),
+                    }),
+                }),
+                right: Rc::new(Expression::Prefix {
+                    op: "-",
+                    value: Rc::new(Expression::Num(3)),
+                }),
+            },
+        }]),
+    );
+
+    test_eq!(
+        conditional_precedence,
+        "1 < -2 != 3 > -4;",
+        Some(vec![Statement::Orphan(Expression::Infix {
+            op: "!=",
+            left: Rc::new(Expression::Infix {
+                op: "<",
+                left: Rc::new(Expression::Num(1)),
+                right: Rc::new(Expression::Prefix {
+                    op: "-",
+                    value: Rc::new(Expression::Num(2)),
+                })
+            }),
+            right: Rc::new(Expression::Infix {
+                op: ">",
+                left: Rc::new(Expression::Num(3)),
+                right: Rc::new(Expression::Prefix {
+                    op: "-",
+                    value: Rc::new(Expression::Num(4)),
+                }),
+            }),
+        })]),
     );
 }
