@@ -71,6 +71,12 @@ fn get_expr<'a, 'b>(
             Token::Ident(i) => expression = Some(Expression::Ident(i)),
             Token::Minus => set_prefix!("-"),
             Token::UnOp(o) => set_prefix!(*o),
+            Token::LParen => {
+                expression = get_expr(tokens);
+                if tokens.next() != Some(&Token::RParen) {
+                    return None;
+                }
+            }
             _ => (),
         }
     }
@@ -315,5 +321,58 @@ mod tests {
                 right: Box::new(Expression::Num(1)),
             },
         }]),
+    );
+
+    test_eq!(
+        let_parens_infix,
+        "let x = (1 + 2) * 3;\n",
+        Some(vec![Statement::Let {
+            ident: "x",
+            value: Expression::Infix {
+                op: "*",
+                left: Box::new(Expression::Infix {
+                    op: "+",
+                    left: Box::new(Expression::Num(1)),
+                    right: Box::new(Expression::Num(2)),
+                }),
+                right: Box::new(Expression::Num(3)),
+            },
+        }]),
+    );
+
+    test_eq!(
+        let_many_parens_infix,
+        "let x = (((1 + 2) * 3) - 4) / 5;\n",
+        Some(vec![Statement::Let {
+            ident: "x",
+            value: Expression::Infix {
+                op: "/",
+                left: Box::new(Expression::Infix {
+                    op: "-",
+                    left: Box::new(Expression::Infix {
+                        op: "*",
+                        left: Box::new(Expression::Infix {
+                            op: "+",
+                            left: Box::new(Expression::Num(1)),
+                            right: Box::new(Expression::Num(2)),
+                        }),
+                        right: Box::new(Expression::Num(3)),
+                    }),
+                    right: Box::new(Expression::Num(4)),
+                }),
+                right: Box::new(Expression::Num(5)),
+            },
+        }]),
+    );
+
+    test_all_eq!(
+        fail_many_parens_infix,
+        &[
+            "let x = (((1 + 2) * 3) - 4) / 5);\n",
+            "let x = (((1 + 2) * 3) - 4 / 5;\n",
+            "let x = (((1 + 2 * 3) - 4) / 5;\n",
+            "let x = ((1 + 2) * 3) - 4) / 5;\n",
+        ],
+        None,
     );
 }
