@@ -50,6 +50,9 @@ fn get_infix_precedence(op: &str) -> u8 {
     }
 }
 
+/* NOTE: See
+ *  `https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html`.
+ */
 fn get_expr<'a, 'b>(
     tokens: &mut Peekable<Iter<'a, Token<'b>>>,
     precedence: u8,
@@ -82,9 +85,6 @@ fn get_expr<'a, 'b>(
             _ => (),
         }
     }
-    /* NOTE: See
-     *  `https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html`.
-     */
     macro_rules! set_infix {
         ($op:expr $(,)?) => {{
             let op_precedence: u8 = get_infix_precedence($op);
