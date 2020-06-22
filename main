@@ -29,5 +29,5 @@ export SHARED_FLAGS=(
 export RUST_BACKTRACE=0
 
 rustfmt --verbose "$WD/src/main.rs"
-rustc -o "$WD/bin/main" "${SHARED_FLAGS[@]}" --test "$WD/src/main.rs"
-"$WD/bin/main"
+rustc -o "$WD/bin/test" "${SHARED_FLAGS[@]}" --test "$WD/src/main.rs"
+"$WD/bin/test"
