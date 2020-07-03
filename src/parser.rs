@@ -93,20 +93,19 @@ fn get_expr<'a, 'b>(
         }};
     }
 
-    if let Some(t) = tokens.next() {
-        match t {
-            Token::LParen => {
-                expression = get_expr(tokens, 0);
-                if tokens.next() != Some(&Token::RParen) {
-                    return None;
-                }
+    match tokens.next() {
+        Some(Token::LParen) => {
+            expression = get_expr(tokens, 0);
+            if tokens.next() != Some(&Token::RParen) {
+                return None;
             }
-            Token::Num(n) => expression = Some(Expression::Num(*n)),
-            Token::Ident(i) => expression = Some(Expression::Ident(i)),
-            Token::Minus => set_prefix!("-"),
-            Token::UnOp(o) => set_prefix!(*o),
-            _ => return None,
         }
+        Some(Token::Num(n)) => expression = Some(Expression::Num(*n)),
+        Some(Token::Ident(i)) => expression = Some(Expression::Ident(i)),
+        Some(Token::Minus) => set_prefix!("-"),
+        Some(Token::UnOp(o)) => set_prefix!(*o),
+        Some(_) => return None,
+        None => (),
     }
     while let Some(t) = tokens.peek() {
         match t {
@@ -142,40 +141,36 @@ fn get_ast<'a>(tokens: &[Token<'a>]) -> Option<Vec<Statement<'a>>> {
         };
     }
 
-    loop {
-        if let Some(t) = tokens.peek() {
-            match t {
-                Token::EOF => return Some(ast),
-                Token::Let => {
-                    eat_token!(tokens);
-                    let ident: &str =
-                        if let Some(Token::Ident(i)) = tokens.next() {
-                            i
-                        } else {
-                            break;
-                        };
-                    break_if_not!(Token::Assign);
-                    let value: Expression<'_> = get_expr_or_break!();
+    while let Some(t) = tokens.peek() {
+        match t {
+            Token::EOF => return Some(ast),
+            Token::Let => {
+                eat_token!(tokens);
+                let ident: &str = if let Some(Token::Ident(i)) = tokens.next()
+                {
+                    i
+                } else {
+                    break;
+                };
+                break_if_not!(Token::Assign);
+                let value: Expression<'_> = get_expr_or_break!();
+                break_if_not!(Token::Semicolon);
+                ast.push(Statement::Let { ident, value });
+            }
+            Token::Return => {
+                eat_token!(tokens);
+                let expression: Expression<'_> = get_expr_or_break!();
+                break_if_not!(Token::Semicolon);
+                ast.push(Statement::Return(expression));
+            }
+            _ => {
+                if let Some(x) = get_expr(&mut tokens, 0) {
                     break_if_not!(Token::Semicolon);
-                    ast.push(Statement::Let { ident, value });
-                }
-                Token::Return => {
-                    eat_token!(tokens);
-                    let expression: Expression<'_> = get_expr_or_break!();
-                    break_if_not!(Token::Semicolon);
-                    ast.push(Statement::Return(expression));
-                }
-                _ => {
-                    if let Some(x) = get_expr(&mut tokens, 0) {
-                        break_if_not!(Token::Semicolon);
-                        ast.push(Statement::Orphan(x));
-                    } else {
-                        break;
-                    }
+                    ast.push(Statement::Orphan(x));
+                } else {
+                    break;
                 }
             }
-        } else {
-            break;
         }
     }
     None

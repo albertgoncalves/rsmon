@@ -102,30 +102,27 @@ pub(crate) fn get_tokens(string: &str) -> Vec<Token<'_>> {
         }};
     }
 
-    loop {
-        if let Some((i, c)) = chars.next() {
-            match c {
-                '(' => tokens.push(Token::LParen),
-                ')' => tokens.push(Token::RParen),
-                '{' => tokens.push(Token::LBrace),
-                '}' => tokens.push(Token::RBrace),
-                ';' => tokens.push(Token::Semicolon),
-                ',' => tokens.push(Token::Comma),
-                '-' => tokens.push(Token::Minus),
-                '=' => push_equality_or!("==", Token::Assign),
-                '!' => push_equality_or!("!=", Token::UnOp("!")),
-                '+' => tokens.push(Token::BinOp("+")),
-                '*' => tokens.push(Token::BinOp("*")),
-                '/' => tokens.push(Token::BinOp("/")),
-                '<' => tokens.push(Token::BinOp("<")),
-                '>' => tokens.push(Token::BinOp(">")),
-                _ => do_other_char!(i, c),
-            }
-        } else {
-            tokens.push(Token::EOF);
-            return tokens;
+    while let Some((i, c)) = chars.next() {
+        match c {
+            '(' => tokens.push(Token::LParen),
+            ')' => tokens.push(Token::RParen),
+            '{' => tokens.push(Token::LBrace),
+            '}' => tokens.push(Token::RBrace),
+            ';' => tokens.push(Token::Semicolon),
+            ',' => tokens.push(Token::Comma),
+            '-' => tokens.push(Token::Minus),
+            '=' => push_equality_or!("==", Token::Assign),
+            '!' => push_equality_or!("!=", Token::UnOp("!")),
+            '+' => tokens.push(Token::BinOp("+")),
+            '*' => tokens.push(Token::BinOp("*")),
+            '/' => tokens.push(Token::BinOp("/")),
+            '<' => tokens.push(Token::BinOp("<")),
+            '>' => tokens.push(Token::BinOp(">")),
+            _ => do_other_char!(i, c),
         }
     }
+    tokens.push(Token::EOF);
+    return tokens;
 }
 
 #[cfg(test)]
