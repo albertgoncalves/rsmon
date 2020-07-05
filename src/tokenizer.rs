@@ -62,43 +62,9 @@ pub(crate) fn get_tokens(string: &str) -> Vec<Token<'_>> {
     }
 
     macro_rules! return_illegal {
-        ($string:expr $(,)?) => {
+        ($string:expr $(,)?) => {{
             tokens.push(Token::Illegal($string));
             return tokens;
-        };
-    }
-
-    macro_rules! do_other_char {
-        ($i:expr, $c:expr $(,)?) => {{
-            if $c.is_whitespace() {
-                continue;
-            } else if $c.is_alphabetic() {
-                let substring: &str = get_substring!(
-                    |c: &char| c.is_alphabetic() || (*c == '_'),
-                    $i,
-                );
-                let token: Token<'_> = match substring {
-                    "let" => Token::Let,
-                    "fn" => Token::Func,
-                    "return" => Token::Return,
-                    "if" => Token::If,
-                    "else" => Token::Else,
-                    "true" => Token::True,
-                    "false" => Token::False,
-                    _ => Token::Ident(substring),
-                };
-                tokens.push(token);
-            } else if $c.is_digit(RADIX) {
-                let substring: &str =
-                    get_substring!(|c: &char| c.is_digit(RADIX), $i);
-                if let Ok(n) = substring.parse() {
-                    tokens.push(Token::Num(n))
-                } else {
-                    return_illegal!(substring);
-                }
-            } else {
-                return_illegal!(&string[$i..$i + 1]);
-            }
         }};
     }
 
@@ -118,7 +84,34 @@ pub(crate) fn get_tokens(string: &str) -> Vec<Token<'_>> {
             '/' => tokens.push(Token::BinOp("/")),
             '<' => tokens.push(Token::BinOp("<")),
             '>' => tokens.push(Token::BinOp(">")),
-            _ => do_other_char!(i, c),
+            _ if c.is_whitespace() => (),
+            _ if c.is_alphabetic() => {
+                let substring: &str = get_substring!(
+                    |c: &char| c.is_alphabetic() || (*c == '_'),
+                    i,
+                );
+                let token: Token<'_> = match substring {
+                    "let" => Token::Let,
+                    "fn" => Token::Func,
+                    "return" => Token::Return,
+                    "if" => Token::If,
+                    "else" => Token::Else,
+                    "true" => Token::True,
+                    "false" => Token::False,
+                    _ => Token::Ident(substring),
+                };
+                tokens.push(token);
+            }
+            _ if c.is_digit(RADIX) => {
+                let substring: &str =
+                    get_substring!(|c: &char| c.is_digit(RADIX), i);
+                if let Ok(n) = substring.parse() {
+                    tokens.push(Token::Num(n))
+                } else {
+                    return_illegal!(substring);
+                }
+            }
+            _ => return_illegal!(&string[i..i + 1]),
         }
     }
     tokens.push(Token::EOF);
